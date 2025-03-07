@@ -28,9 +28,10 @@ VHSLoadFormats = {
     'LTXV': {'target_rate': 24, 'dim': (32,0,768,512), 'frames':(8,1)},
     'Hunyuan': {'target_rate': 24, 'dim': (16,0,848,480), 'frames':(4,1)},
     'Cosmos': {'target_rate': 24, 'dim': (16,0,1280,704), 'frames':(8,1)},
+    'Wan': {'target_rate': 16, 'dim': (8,0,832,480), 'frames':(4,1)},
 }
 """
-External plugins may add additional formats to utils.extra_config.VHSLoadFormats
+External plugins may add additional formats to nodes.VHSLoadFormats
 In addition to shorthand options, direct widget names will map a given dict to options.
 Adding a third arguement to a frames tuple can enable strict checks on number
 of loaded frames, i.e (8,1,True)
@@ -343,8 +344,12 @@ def load_video(meta_batch=None, unique_id=None, memory_limit_mb=None, vae=None,
         max_loadable_frames = int(memory_limit//(width*height*3*(.1)))
     if meta_batch is not None:
         if 'frames' in format:
-            assert frames_per_batch % format['frames'][0] == format['frames'][1], \
-                   "The chosen frames per batch is incompatible with the selected format"
+            if meta_batch.frames_per_batch % format['frames'][0] != format['frames'][1]:
+                error = (meta_batch.frames_per_batch - format['frames'][1]) % format['frames'][0]
+                suggested = meta_batch.frames_per_batch - error
+                if error > format['frames'][0] / 2:
+                    suggested += format['frames'][0]
+                raise RuntimeError(f"The chosen frames per batch is incompatible with the selected format. Try {suggested}")
         if meta_batch.frames_per_batch > max_loadable_frames:
             raise RuntimeError(f"Meta Batch set to {meta_batch.frames_per_batch} frames but only {max_loadable_frames} can fit in memory")
         gen = itertools.islice(gen, meta_batch.frames_per_batch)
@@ -534,7 +539,6 @@ class LoadVideoFFmpegUpload:
                 }
 
     CATEGORY = "Video Helper Suite 🎥🅥🅗🅢"
-    EXPERIMENTAL=True
 
     RETURN_TYPES = (imageOrLatent, "MASK", "AUDIO", "VHS_VIDEOINFO")
     RETURN_NAMES = ("IMAGE", "mask", "audio", "video_info")
@@ -584,7 +588,6 @@ class LoadVideoFFmpegPath:
         }
 
     CATEGORY = "Video Helper Suite 🎥🅥🅗🅢"
-    EXPERIMENTAL=True
 
     RETURN_TYPES = (imageOrLatent, "MASK", "AUDIO", "VHS_VIDEOINFO")
     RETURN_NAMES = ("IMAGE", "mask", "audio", "video_info")
@@ -629,7 +632,6 @@ class LoadImagePath:
         }
 
     CATEGORY = "Video Helper Suite 🎥🅥🅗🅢"
-    EXPERIMENTAL=True
 
     RETURN_TYPES = (imageOrLatent, "MASK")
     RETURN_NAMES = ("IMAGE", "mask")

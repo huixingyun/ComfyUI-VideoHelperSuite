@@ -724,7 +724,7 @@ function addUploadWidget(nodeType, nodeData, widgetName, type="video") {
         } else if (type == "video") {
             Object.assign(fileInput, {
                 type: "file",
-                accept: "video/webm,video/mp4,video/mkv,image/gif",
+                accept: "video/webm,video/mp4,video/x-matroska,image/gif",
                 style: "display: none",
                 onchange: async () => {
                     if (fileInput.files.length) {
@@ -813,6 +813,14 @@ function addVideoPreview(nodeType, isInput=true) {
         element.addEventListener('mousewheel', (e)  => {
             e.preventDefault()
             return app.canvas._mousewheel_callback(e)
+        }, true);
+        element.addEventListener('pointermove', (e)  => {
+            e.preventDefault()
+            return app.canvas._mousemove_callback(e)
+        }, true);
+        element.addEventListener('pointerup', (e)  => {
+            e.preventDefault()
+            return app.canvas._mouseup_callback(e)
         }, true);
         previewWidget.value = {hidden: false, paused: false, params: {},
             muted: app.ui.settings.getSettingValue("VHS.DefaultMute")}
@@ -1363,7 +1371,7 @@ function inner_value_change(widget, value, node, pos) {
 }
 function drawAnnotated(ctx, node, widget_width, y, H) {
   const litegraph_base = LiteGraph
-  const show_text = app.canvas.ds.scale > 0.5
+  const show_text = app.canvas.ds.scale >= (app.canvas.low_quality_zoom_threshold ?? 0.5)
   const margin = 15
   ctx.textAlign = 'left'
   ctx.strokeStyle = litegraph_base.WIDGET_OUTLINE_COLOR
@@ -1899,7 +1907,7 @@ app.registerExtension({
                     value : "",
                     draw : function(ctx, node, widget_width, y, H) {
                         //Adapted from litegraph.core.js:drawNodeWidgets
-                        var show_text = app.canvas.ds.scale > 0.5;
+                        var show_text = app.canvas.ds.scale >= (app.canvas.low_quality_zoom_threshold ?? 0.5)
                         var margin = 15;
                         var text_color = LiteGraph.WIDGET_TEXT_COLOR;
                         var secondary_text_color = LiteGraph.WIDGET_SECONDARY_TEXT_COLOR;
@@ -2116,6 +2124,27 @@ api.addEventListener('VHS_latentpreview', ({ detail }) => {
             serialize: false,
             hideOnZoom: false,
         });
+        canvasEl.addEventListener('contextmenu', (e)  => {
+            e.preventDefault()
+            return app.canvas._mousedown_callback(e)
+        }, true);
+        canvasEl.addEventListener('pointerdown', (e)  => {
+            e.preventDefault()
+            return app.canvas._mousedown_callback(e)
+        }, true);
+        canvasEl.addEventListener('mousewheel', (e)  => {
+            e.preventDefault()
+            return app.canvas._mousewheel_callback(e)
+        }, true);
+        canvasEl.addEventListener('pointermove', (e)  => {
+            e.preventDefault()
+            return app.canvas._mousemove_callback(e)
+        }, true);
+        canvasEl.addEventListener('pointerup', (e)  => {
+            e.preventDefault()
+            return app.canvas._mouseup_callback(e)
+        }, true);
+
         previewWidget.computeSize = function(width) {
             if (this.aspectRatio) {
                 let height = (previewNode.size[0]-20)/ this.aspectRatio + 10;

@@ -131,6 +131,48 @@ async def view_video(request):
     except BrokenPipeError as e:
         pass
     return resp
+@server.PromptServer.instance.routes.get("/vhs/viewaudio")
+async def view_audio(request):
+    query = request.rel_url.query
+    path_res = await resolve_path(query)
+    if isinstance(path_res, web.Response):
+        return path_res
+    file, filename, output_dir = path_res
+    if ffmpeg_path is None:
+        #Don't just return file, that provides  arbitrary read access to any file
+        if is_safe_path(output_dir, strict=True):
+            return web.FileResponse(path=file)
+
+    in_args = ["-i", file]
+    start_time = 0
+    if 'start_time' in query:
+        start_time = float(query['start_time'])
+    args = [ffmpeg_path, "-v", "error", '-vn'] + in_args + ['-ss', str(start_time)]
+    if float(query.get('duration', 0)) > 0:
+        args += ['-t', str(query['duration'])]
+    if query.get('deadline', 'realtime') == 'good':
+        deadline = 'good'
+    else:
+        deadline = 'realtime'
+
+    args += ['-c:a', 'libopus','-deadline', deadline, '-cpu-used', '8', '-f', 'webm', '-']
+    try:
+        proc = await asyncio.create_subprocess_exec(*args, stdout=subprocess.PIPE,
+                                                    stdin=subprocess.DEVNULL)
+        try:
+            resp = web.StreamResponse()
+            resp.content_type = 'audio/webm'
+            resp.headers["Content-Disposition"] = f"filename=\"{filename}\""
+            await resp.prepare(request)
+            while len(bytes_read := await proc.stdout.read(2**20)) != 0:
+                await resp.write(bytes_read)
+            #Of dubious value given frequency of kill calls, but more correct
+            await proc.wait()
+        except (ConnectionResetError, ConnectionError) as e:
+            proc.kill()
+    except BrokenPipeError as e:
+        pass
+    return resp
 
 query_cache = {}
 @server.PromptServer.instance.routes.get("/vhs/queryvideo")
@@ -149,24 +191,24 @@ async def query_video(request):
     else:
         source = {}
         try:
-            cont = av.open(filepath)
-            stream = cont.streams.video[0]
-            source['fps'] = float(stream.average_rate)
-            source['duration'] = float(cont.duration / av.time_base)
+            with av.open(filepath) as cont:
+                stream = cont.streams.video[0]
+                source['fps'] = float(stream.average_rate)
+                source['duration'] = float(cont.duration / av.time_base)
 
-            if stream.codec_context.name == 'vp9':
-                cc = av.Codec('libvpx-vp9', 'r').create()
-            else:
-                cc = stream
-            def fit():
-                for packet in cont.demux(video=0):
-                    yield from cc.decode(packet)
-            frame = next(fit())
+                if stream.codec_context.name == 'vp9':
+                    cc = av.Codec('libvpx-vp9', 'r').create()
+                else:
+                    cc = stream
+                def fit():
+                    for packet in cont.demux(video=0):
+                        yield from cc.decode(packet)
+                frame = next(fit())
 
-            source['size'] = [frame.width, frame.height]
-            source['alpha'] = 'a' in frame.format.name
-            source['frames'] = stream.metadata.get('NUMBER_OF_FRAMES', round(source['duration'] * source['fps']))
-            query_cache[filepath] = (os.stat(filepath).st_mtime, source)
+                source['size'] = [frame.width, frame.height]
+                source['alpha'] = 'a' in frame.format.name
+                source['frames'] = stream.metadata.get('NUMBER_OF_FRAMES', round(source['duration'] * source['fps']))
+                query_cache[filepath] = (os.stat(filepath).st_mtime, source)
         except Exception:
             pass
     if not 'frames' in source:
@@ -174,7 +216,7 @@ async def query_video(request):
     loaded = {}
     loaded['duration'] = source['duration']
     loaded['duration'] -= float(query.get('start_time',0))
-    loaded['fps'] = float(query.get('force_rate', 0)) or source['fps']
+    loaded['fps'] = float(query.get('force_rate', 0)) or source.get('fps',1)
     loaded['duration'] -= int(query.get('skip_first_frames', 0)) / loaded['fps']
     loaded['fps'] /= int(query.get('select_every_nth', 1)) or 1
     loaded['frames'] = round(loaded['duration'] * loaded['fps'])
@@ -213,6 +255,8 @@ async def resolve_path(query):
         filename = os.path.basename(filename)
         file = os.path.join(output_dir, filename)
 
+        if not os.path.exists(file):
+            return web.Response(status=204)
         if query.get('format', 'video') == 'folder':
             if not os.path.isdir(file):
                 return web.Response(status=204)
